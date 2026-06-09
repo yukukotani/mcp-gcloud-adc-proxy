@@ -1,7 +1,7 @@
 {
   "name": "mcp-gcloud-adc-proxy",
   "description": "An auth proxy for accessing remote MCP servers using Google Cloud Application Default Credentials (ADC)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "keywords": [
     "mcp",
     "model context protocol",
