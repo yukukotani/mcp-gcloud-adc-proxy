@@ -91,10 +91,6 @@ export function validateCliOptions(options: CliOptions): void {
   if (timeout <= 0) {
     throw new Error("Timeout must be positive");
   }
-
-  if (timeout > 600000) {
-    throw new Error("Timeout cannot exceed 10 minutes (600000ms)");
-  }
 }
 
 export async function executeProxyCommand(options: CliOptions): Promise<void> {

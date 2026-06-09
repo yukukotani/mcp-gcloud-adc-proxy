@@ -74,13 +74,13 @@ describe("CLI", () => {
       ).toThrow("Timeout must be positive");
     });
 
-    it("大きすぎるタイムアウトを拒否する", () => {
+    it("大きなタイムアウトを許可する", () => {
       expect(() =>
         validateCliOptions({
           url: "https://example.com",
-          timeout: 700000,
+          timeout: 1800000,
         }),
-      ).toThrow("Timeout cannot exceed 10 minutes (600000ms)");
+      ).not.toThrow();
     });
   });
 
