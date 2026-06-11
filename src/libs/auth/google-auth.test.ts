@@ -227,6 +227,26 @@ describe("createAuthClient", () => {
     expect(typeof client.getIdToken).toBe("function");
     expect(typeof client.refreshToken).toBe("function");
   });
+
+  it("インパーソネーション+送出フラグ有効時に getImpersonatorIdToken を生やす", () => {
+    const client = createAuthClient({
+      serviceAccountEmail: "test-sa@project.iam.gserviceaccount.com",
+      emitImpersonatorToken: true,
+    });
+    expect(typeof client.getImpersonatorIdToken).toBe("function");
+  });
+
+  it("送出フラグ無効時は getImpersonatorIdToken を生やさない", () => {
+    const client = createAuthClient({
+      serviceAccountEmail: "test-sa@project.iam.gserviceaccount.com",
+    });
+    expect(client.getImpersonatorIdToken).toBeUndefined();
+  });
+
+  it("インパーソネーション未指定なら送出フラグがあっても生やさない", () => {
+    const client = createAuthClient({ emitImpersonatorToken: true });
+    expect(client.getImpersonatorIdToken).toBeUndefined();
+  });
 });
 
 describe.skip("サービスアカウントインパーソネーション", () => {

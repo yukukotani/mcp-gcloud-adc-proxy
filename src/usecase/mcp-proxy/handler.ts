@@ -15,6 +15,27 @@ import {
 } from "../../presentation/mcp-proxy-handlers.js";
 import type { McpProxy, ProxyConfig } from "./types.js";
 
+// インパーソネーション元（実ユーザー）のIDトークンを X-Impersonator-Id-Token
+// ヘッダーに付与する。取得失敗時はヘッダーを付けずに続行する（上流が SA 単独で
+// fail-closed に倒れるだけ）。authClient がこのメソッドを持たない場合は何もしない。
+const attachImpersonatorHeader = async (
+  config: ProxyConfig,
+  headers: Record<string, string>,
+): Promise<void> => {
+  if (!config.authClient.getImpersonatorIdToken) {
+    return;
+  }
+  const result = await config.authClient.getImpersonatorIdToken();
+  if (result.type === "success") {
+    headers["X-Impersonator-Id-Token"] = result.token;
+  } else {
+    logger.warn(
+      { error: result.error },
+      "Impersonator ID token unavailable; continuing without it",
+    );
+  }
+};
+
 const handleRequest = async (
   config: ProxyConfig,
   request: JSONRPCRequest,
@@ -54,6 +75,7 @@ const handleRequest = async (
     }
 
     headers.Authorization = `Bearer ${tokenResult.token}`;
+    await attachImpersonatorHeader(config, headers);
 
     const httpResponse = await config.httpClient.post({
       url: config.targetUrl,
@@ -160,6 +182,7 @@ const handleMessage = async (
       }
 
       headers.Authorization = `Bearer ${tokenResult.token}`;
+      await attachImpersonatorHeader(config, headers);
 
       const httpResponse = await config.httpClient.post({
         url: config.targetUrl,

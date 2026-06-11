@@ -12,7 +12,15 @@ type GoogleAuthState = {
   tokenCache: TokenCache;
   serviceAccountEmail?: string;
   includeEmail: boolean;
+  emitImpersonatorToken: boolean;
+  // インパーソネーション元トークンは aud 固定のため単一エントリでキャッシュする。
+  // Authorization 用の tokenCache とはキー空間を分離する。
+  impersonatorTokenCache: TokenCache;
 };
+
+// インパーソネーション元トークンのキャッシュキー（aud は固定だが、形式を
+// tokenCache に揃えるための内部キー）。
+const IMPERSONATOR_CACHE_KEY = "impersonator";
 
 const isValidAudience = (
   audience: string,
@@ -287,6 +295,100 @@ const fetchNewToken = async (
   }
 };
 
+// インパーソネーションを「挟まない」素のADCクライアント（gcloudユーザー）から
+// refresh_token グラントでIDトークンを取得する。target_audience を指定しない
+// ため `gcloud auth print-identity-token` 相当となり、email クレームを含み
+// aud は gcloud の client id になる。
+const fetchImpersonatorIdToken = async (
+  state: GoogleAuthState,
+): Promise<GetIdTokenResult> => {
+  try {
+    const client = await state.googleAuth.getClient();
+    if (!client) {
+      return {
+        type: "error",
+        error: {
+          kind: "no-credentials",
+          message:
+            'No credentials found. Please run "gcloud auth application-default login".',
+        },
+      };
+    }
+
+    // refresh_token グラントで素のIDトークンを返せるのは UserRefreshClient のみ。
+    // SAキーやCompute等の非ユーザー資格情報では impersonator トークンを出さない。
+    if (!("refreshTokenNoCache" in client)) {
+      return {
+        type: "error",
+        error: {
+          kind: "no-credentials",
+          message:
+            "ADC is not a user credential; cannot emit an impersonator ID token.",
+        },
+      };
+    }
+
+    // refreshTokenNoCache は UserRefreshClient 上では型定義上 protected だが、
+    // 実行時は public（refreshclient.js）。unknown 経由でキャストして呼ぶ。
+    const { tokens } = await (
+      client as unknown as {
+        refreshTokenNoCache: () => Promise<{ tokens: { id_token?: string } }>;
+      }
+    ).refreshTokenNoCache();
+    const idToken = tokens.id_token;
+
+    if (!idToken || typeof idToken !== "string") {
+      return {
+        type: "error",
+        error: {
+          kind: "invalid-token",
+          message: "Refresh response did not include an id_token.",
+        },
+      };
+    }
+
+    const expiresAt = extractTokenExpiration(idToken);
+    state.impersonatorTokenCache[IMPERSONATOR_CACHE_KEY] = {
+      token: idToken,
+      expiresAt,
+    };
+
+    logger.debug(
+      { expiresAt },
+      "Successfully fetched and cached impersonator ID token",
+    );
+
+    return { type: "success", token: idToken, expiresAt };
+  } catch (error) {
+    logger.error(
+      { error: error instanceof Error ? error.message : "Unknown error" },
+      "Failed to fetch impersonator ID token",
+    );
+    return {
+      type: "error",
+      error: {
+        kind: "token-fetch-failed",
+        message: `Failed to fetch impersonator ID token: ${error instanceof Error ? error.message : "Unknown error"}`,
+      },
+    };
+  }
+};
+
+const getImpersonatorIdToken = async (
+  state: GoogleAuthState,
+): Promise<GetIdTokenResult> => {
+  const cached = state.impersonatorTokenCache[IMPERSONATOR_CACHE_KEY];
+  if (cached && isTokenValid(cached.expiresAt)) {
+    logger.debug("Using cached impersonator token");
+    return {
+      type: "success",
+      token: cached.token,
+      expiresAt: cached.expiresAt,
+    };
+  }
+  return fetchImpersonatorIdToken(state);
+};
+
 const getIdToken = async (
   state: GoogleAuthState,
   audience: string,
@@ -352,7 +454,9 @@ const createGoogleAuthState = (config: AuthConfig = {}): GoogleAuthState => {
   return {
     googleAuth: new GoogleAuth(authOptions),
     tokenCache: {},
+    impersonatorTokenCache: {},
     includeEmail: config.includeEmail ?? true,
+    emitImpersonatorToken: config.emitImpersonatorToken ?? false,
     ...(config.serviceAccountEmail && {
       serviceAccountEmail: config.serviceAccountEmail,
     }),
@@ -366,5 +470,9 @@ export function createAuthClient(config: AuthConfig = {}): AuthClient {
   return {
     getIdToken: (audience: string) => getIdToken(state, audience),
     refreshToken: (audience: string) => refreshToken(state, audience),
+    // インパーソネーション有効かつ送出フラグが立っているときのみ生やす。
+    ...(state.emitImpersonatorToken && state.serviceAccountEmail
+      ? { getImpersonatorIdToken: () => getImpersonatorIdToken(state) }
+      : {}),
   };
 }

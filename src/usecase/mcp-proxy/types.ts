@@ -32,4 +32,5 @@ export type ProxyOptions = {
   impersonateServiceAccount?: string;
   audiences?: string;
   includeEmail?: boolean;
+  forwardImpersonatorToken?: boolean;
 };

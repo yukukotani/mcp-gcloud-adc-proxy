@@ -53,6 +53,28 @@ npx mcp-gcloud-adc-proxy \
 - The ADC principal must have the `roles/iam.serviceAccountTokenCreator` role on the target service account
 - The target service account must have the necessary permissions to access the remote MCP server
 
+#### Forwarding the original user's identity
+
+When impersonation is enabled **and** `--forward-impersonator-token` is passed,
+the proxy also attaches an `X-Impersonator-Id-Token` header containing an ID token
+of the **original ADC user** (the human who ran the proxy), in addition to the
+impersonated service account token in `Authorization`.
+
+```bash
+npx mcp-gcloud-adc-proxy \
+  --url https://your-cloud-run-service.run.app \
+  --impersonate-service-account your-sa@your-project.iam.gserviceaccount.com \
+  --forward-impersonator-token
+```
+
+This lets a remote MCP server that authenticates via the service account still
+learn who the real caller is (e.g. to scope per-user permissions). It is **off by
+default**; without the flag, only the service account token is sent. The header is
+attached only when the ADC is a user credential (`gcloud auth application-default
+login`); it is omitted for service-account keys and other non-user credentials.
+If the original user's token cannot be obtained, the request still proceeds
+without the header.
+
 ### Custom Audience
 
 By default, the target URL is used as the audience for the ID token. You can override this with the `--audiences` option:

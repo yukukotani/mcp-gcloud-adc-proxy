@@ -32,6 +32,11 @@ const proxyCommand = define({
       type: "boolean",
       description: "Include email in ID token (default: true)",
     },
+    "forward-impersonator-token": {
+      type: "boolean",
+      description:
+        "When impersonating, also forward the original ADC user's ID token in the X-Impersonator-Id-Token header (default: false)",
+    },
   },
   examples: `# Basic usage (HTTPS)
 $ mcp-gcloud-adc-proxy --url https://my-service-abc123-uc.a.run.app
@@ -46,7 +51,10 @@ $ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app -t 60000
 $ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --impersonate-service-account sa@project.iam.gserviceaccount.com
 
 # With custom audience
-$ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --audiences https://example.com`,
+$ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --audiences https://example.com
+
+# Impersonate and also forward the original user's ID token
+$ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --impersonate-service-account sa@project.iam.gserviceaccount.com --forward-impersonator-token`,
   run: async (ctx) => {
     const {
       url,
@@ -54,6 +62,7 @@ $ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --audiences htt
       "impersonate-service-account": impersonateServiceAccount,
       audiences,
       "include-email": includeEmail,
+      "forward-impersonator-token": forwardImpersonatorToken,
     } = ctx.values;
     await executeProxyCommand({
       url,
@@ -63,6 +72,9 @@ $ mcp-gcloud-adc-proxy -u https://my-service-abc123-uc.a.run.app --audiences htt
       }),
       ...(typeof audiences === "string" && { audiences }),
       ...(typeof includeEmail === "boolean" && { includeEmail }),
+      ...(typeof forwardImpersonatorToken === "boolean" && {
+        forwardImpersonatorToken,
+      }),
     });
   },
 });
@@ -73,6 +85,7 @@ export type CliOptions = {
   impersonateServiceAccount?: string;
   audiences?: string;
   includeEmail?: boolean;
+  forwardImpersonatorToken?: boolean;
 };
 
 export function validateCliOptions(options: CliOptions): void {
@@ -101,6 +114,7 @@ export async function executeProxyCommand(options: CliOptions): Promise<void> {
       impersonateServiceAccount: options.impersonateServiceAccount,
       audiences: options.audiences,
       includeEmail: options.includeEmail,
+      forwardImpersonatorToken: options.forwardImpersonatorToken,
     },
     "Executing proxy command",
   );
@@ -116,6 +130,9 @@ export async function executeProxyCommand(options: CliOptions): Promise<void> {
     ...(options.audiences && { audiences: options.audiences }),
     ...(options.includeEmail !== undefined && {
       includeEmail: options.includeEmail,
+    }),
+    ...(options.forwardImpersonatorToken !== undefined && {
+      forwardImpersonatorToken: options.forwardImpersonatorToken,
     }),
   });
 

@@ -369,6 +369,80 @@ describe("McpProxy", () => {
       });
     });
   });
+
+  describe("X-Impersonator-Id-Token ヘッダー", () => {
+    const request: JSONRPCRequest = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      method: "tools/list",
+      params: {},
+    };
+    const okResponse: JSONRPCResponse = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      result: { tools: [] },
+    };
+
+    beforeEach(() => {
+      (mockSessionManager.getSessionId as Mock).mockReturnValue(null);
+      (mockAuthClient.getIdToken as Mock).mockResolvedValue({
+        type: "success",
+        token: "mock-token",
+        expiresAt: new Date(Date.now() + 3600000),
+      });
+      (mockHttpClient.post as Mock).mockResolvedValue({
+        type: "success",
+        data: okResponse,
+        status: 200,
+        headers: {},
+      });
+    });
+
+    it("getImpersonatorIdToken 成功時にヘッダーを付与する", async () => {
+      mockAuthClient.getImpersonatorIdToken = vi.fn().mockResolvedValue({
+        type: "success",
+        token: "impersonator-token",
+        expiresAt: new Date(Date.now() + 3600000),
+      }) as Mock;
+      const p = createMcpProxy(config);
+
+      await p.handleRequest(request);
+
+      const postArg = (mockHttpClient.post as Mock).mock.calls[0]?.[0] as {
+        headers: Record<string, string>;
+      };
+      expect(postArg.headers["X-Impersonator-Id-Token"]).toBe(
+        "impersonator-token",
+      );
+    });
+
+    it("getImpersonatorIdToken 失敗時はヘッダーを付与せず続行する", async () => {
+      mockAuthClient.getImpersonatorIdToken = vi.fn().mockResolvedValue({
+        type: "error",
+        error: { kind: "no-credentials", message: "no user credential" },
+      }) as Mock;
+      const p = createMcpProxy(config);
+
+      const result = await p.handleRequest(request);
+
+      const postArg = (mockHttpClient.post as Mock).mock.calls[0]?.[0] as {
+        headers: Record<string, string>;
+      };
+      expect("X-Impersonator-Id-Token" in postArg.headers).toBe(false);
+      expect(result).toEqual(okResponse);
+    });
+
+    it("getImpersonatorIdToken 未定義時はヘッダーを付与しない", async () => {
+      const p = createMcpProxy(config);
+
+      await p.handleRequest(request);
+
+      const postArg = (mockHttpClient.post as Mock).mock.calls[0]?.[0] as {
+        headers: Record<string, string>;
+      };
+      expect("X-Impersonator-Id-Token" in postArg.headers).toBe(false);
+    });
+  });
 });
 
 describe("createMcpProxy", () => {
