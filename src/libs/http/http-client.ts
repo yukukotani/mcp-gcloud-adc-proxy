@@ -63,12 +63,33 @@ const post = async (config: HttpRequestConfig): Promise<HttpResponse> => {
     let data: unknown;
 
     try {
-      // SSE形式のレスポンスをチェック（MCP over HTTP）
-      if (responseText.includes("event: message\ndata: ")) {
-        const dataMatch = responseText.match(/data: (.+)/);
-        if (dataMatch?.[1]) {
-          data = JSON.parse(dataMatch[1]);
-        } else {
+      // SSE形式のレスポンス(MCP over HTTP)は "data:" で始まる行を持つ。
+      // 本文中に文字列 "data:" を含む通常のJSONを誤検出しないよう、行頭で判定する。
+      const dataLines = responseText
+        .split("\n")
+        .filter((line) => line.startsWith("data:"));
+      if (dataLines.length > 0) {
+        // ストリームには進捗通知(notifications/progress)等がレスポンスより前に
+        // 含まれうる。全 data: 行を見て JSON-RPC レスポンス(idを持つ)を優先返却。
+        // 無ければ最後の有効なJSONを返す。
+        const messages = dataLines
+          .map((line) => line.slice("data:".length).trim())
+          .filter(Boolean)
+          .flatMap((payload) => {
+            try {
+              return [JSON.parse(payload)];
+            } catch {
+              return [];
+            }
+          });
+        const jsonRpcResponse = [...messages]
+          .reverse()
+          .find(
+            (m): m is Record<string, unknown> =>
+              typeof m === "object" && m !== null && "id" in m,
+          );
+        data = jsonRpcResponse ?? messages[messages.length - 1];
+        if (data === undefined) {
           return {
             type: "error",
             error: {

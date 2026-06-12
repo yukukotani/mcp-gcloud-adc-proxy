@@ -1,6 +1,10 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { InitializeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { JSONRPCResponse } from "@modelcontextprotocol/sdk/types.js";
+import {
+  InitializeRequestSchema,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { McpProxy } from "../usecase/mcp-proxy/types.js";
 
 type IdGeneratorFn = () => string | number;
@@ -8,6 +12,26 @@ type IdGeneratorFn = () => string | number;
 type HandlerConfig = {
   proxy: McpProxy;
   idGenerator: IdGeneratorFn;
+};
+
+// SDKのリクエストハンドラはthrowされたMcpErrorをJSON-RPCエラーレスポンスとして
+// クライアントに返す仕様のため、ここでは tagged union ではなく throw で伝播する。
+const unwrapProxyResponse = (
+  proxyResponse: JSONRPCResponse,
+): Record<string, unknown> => {
+  const errorField = (
+    proxyResponse as unknown as {
+      error?: { code?: number; message?: string; data?: unknown };
+    }
+  ).error;
+  if (errorField) {
+    throw new McpError(
+      errorField.code ?? -32603,
+      errorField.message ?? "Unknown upstream error",
+      errorField.data,
+    );
+  }
+  return (proxyResponse.result as Record<string, unknown> | undefined) || {};
 };
 
 export function registerProxyHandlers(
@@ -23,7 +47,7 @@ export function registerProxyHandlers(
       method: "initialize",
       params: request.params,
     });
-    return proxyResponse.result || {};
+    return unwrapProxyResponse(proxyResponse);
   });
 
   server.fallbackRequestHandler = async (request, _) => {
@@ -33,7 +57,7 @@ export function registerProxyHandlers(
       method: request.method,
       params: request.params,
     });
-    return proxyResponse.result || {};
+    return unwrapProxyResponse(proxyResponse);
   };
 }
 
