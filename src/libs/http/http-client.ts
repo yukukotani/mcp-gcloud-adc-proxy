@@ -1,6 +1,7 @@
 import { logger } from "../logging/logger.js";
 import type {
   HttpClient,
+  HttpError,
   HttpRequestConfig,
   HttpResponse,
   StreamChunk,
@@ -13,6 +14,18 @@ const extractHeaders = (headers: Headers): Record<string, string> => {
   });
   return result;
 };
+
+const isRedirect = (status: number): boolean => status >= 300 && status < 400;
+
+// リダイレクトを追うと、ランタイムは Authorization を落とすが独自ヘッダは落とさない。
+// 呼び出し側が資格情報を独自ヘッダで渡している場合、それが転送先のオリジンに渡る。
+const redirectError = (response: Response): HttpError => ({
+  kind: "http-error",
+  status: response.status,
+  message: `Redirect not followed (HTTP ${response.status} ${response.statusText}) to ${
+    response.headers.get("location") ?? "unknown location"
+  }. Forwarded credentials must not reach another origin.`,
+});
 
 const safeReadResponseText = async (response: Response): Promise<string> => {
   try {
@@ -40,11 +53,16 @@ const post = async (config: HttpRequestConfig): Promise<HttpResponse> => {
       },
       body: JSON.stringify(config.body),
       signal: controller.signal,
+      redirect: "manual",
     });
 
     clearTimeout(timeoutId);
 
     const responseHeaders = extractHeaders(response.headers);
+
+    if (isRedirect(response.status)) {
+      return { type: "error", error: redirectError(response) };
+    }
 
     if (!response.ok) {
       const errorBody = await safeReadResponseText(response);
@@ -178,9 +196,15 @@ async function* postStream(
       },
       body: JSON.stringify(config.body),
       signal: controller.signal,
+      redirect: "manual",
     });
 
     clearTimeout(timeoutId);
+
+    if (isRedirect(response.status)) {
+      yield { type: "error", error: redirectError(response) };
+      return;
+    }
 
     if (!response.ok) {
       const errorBody = await safeReadResponseText(response);

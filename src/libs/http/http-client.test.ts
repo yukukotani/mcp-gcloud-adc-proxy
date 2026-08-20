@@ -60,6 +60,7 @@ describe("HttpClient", () => {
         },
         body: '{"test":"data"}',
         signal: mockAbortController.signal,
+        redirect: "manual",
       });
 
       expect(result.type).toBe("success");
@@ -312,6 +313,84 @@ describe("HttpClient", () => {
           message: "Request timed out after 1000ms",
         },
       });
+    });
+  });
+});
+
+describe("リダイレクト", () => {
+  let httpClient: ReturnType<typeof createHttpClient>;
+
+  beforeEach(() => {
+    httpClient = createHttpClient();
+    vi.clearAllMocks();
+    global.AbortController = vi.fn().mockImplementation(() => ({
+      abort: vi.fn(),
+      signal: { aborted: false },
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const config: HttpRequestConfig = {
+    url: "https://example.com/api",
+    headers: { "x-impersonator-id-token": "dummy-token" },
+    body: {},
+    timeout: 5000,
+  };
+
+  const redirectResponse = {
+    ok: false,
+    status: 302,
+    statusText: "Found",
+    headers: new Map([["location", "https://example.com/login"]]),
+    text: vi.fn().mockResolvedValue(""),
+  };
+
+  it("postはリダイレクトを追わない", async () => {
+    mockFetch.mockResolvedValue(redirectResponse);
+
+    const result = await httpClient.post(config);
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://example.com/api",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(result).toMatchObject({
+      type: "error",
+      error: { kind: "http-error", status: 302 },
+    });
+  });
+
+  it("postはリダイレクト先を理由に添える", async () => {
+    mockFetch.mockResolvedValue(redirectResponse);
+
+    const result = await httpClient.post(config);
+
+    expect(result.type).toBe("error");
+    if (result.type !== "error" || result.error.kind !== "http-error") {
+      throw new Error("unexpected result");
+    }
+    expect(result.error.message).toContain("Redirect");
+    expect(result.error.message).toContain("https://example.com/login");
+  });
+
+  it("postStreamはリダイレクトを追わない", async () => {
+    mockFetch.mockResolvedValue(redirectResponse);
+
+    const chunks = [];
+    for await (const chunk of httpClient.postStream(config)) {
+      chunks.push(chunk);
+    }
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      "https://example.com/api",
+      expect.objectContaining({ redirect: "manual" }),
+    );
+    expect(chunks[0]).toMatchObject({
+      type: "error",
+      error: { kind: "http-error", status: 302 },
     });
   });
 });
