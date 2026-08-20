@@ -75,6 +75,11 @@ login`); it is omitted for service-account keys and other non-user credentials.
 If the original user's token cannot be obtained, the request still proceeds
 without the header.
 
+Redirects are **not** followed. `Authorization` is dropped by the runtime on a
+cross-origin redirect, but custom headers such as `X-Impersonator-Id-Token` are
+not, so following a redirect would hand the caller's ID token to another origin.
+A redirect response is returned to the caller as an HTTP error instead.
+
 ### Custom Audience
 
 By default, the target URL is used as the audience for the ID token. You can override this with the `--audiences` option:
